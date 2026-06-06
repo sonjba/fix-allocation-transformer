@@ -7,7 +7,7 @@ name = "fix-allocation-transformer"
 version = "0.1.0"
 description = "FIX 4.4 AllocationInstruction transformer: parse and flatten to CSV"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 authors = [
     {name = "Sonja", email = "sonja.bacinski@live.com"},
 ]
