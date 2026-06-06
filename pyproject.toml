@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fix-allocation-transformer"
+version = "0.1.0"
+description = "FIX 4.4 AllocationInstruction transformer: parse and flatten to CSV"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    {name = "Sonja", email = "sonja.bacinski@live.com"},
+]
+
+dependencies = [
+    # No runtime dependencies for MVP
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+fix-alloc = "fix_alloc.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fix_alloc"]
