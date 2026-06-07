@@ -82,6 +82,60 @@ PARTIES_GROUP = GroupSpec(
 )
 
 
+def extract_group(
+    tokens: List[Tuple[int, str]],
+    spec: GroupSpec,
+) -> Tuple[List[Dict[int, str]], int]:
+    """
+    Extract one repeating group from a flat token list.
+
+    Walks the tokens, using the spec's delimiter tag to mark where each
+    entry starts. Stops when it hits a tag that doesn't belong to the group.
+
+    Returns:
+        (entries, declared_count)
+          entries        — list of dicts, each {tag: value} for one entry
+          declared_count — the count the message claims (from the count tag)
+    """
+    # 1. Find the count tag, and where the entries begin
+    start_index = None
+    declared_count = 0
+    for i, (tag, value) in enumerate(tokens):
+        if tag == spec.count_tag:
+            declared_count = int(value)
+            start_index = i + 1
+            break
+
+    # Group not present in this message
+    if start_index is None:
+        return [], 0
+
+    # 2. Walk the entries
+    entries = []
+    current = None
+
+    for tag, value in tokens[start_index:]:
+        if tag == spec.delimiter_tag:
+            # delimiter → a new entry begins
+            if current is not None:
+                entries.append(current)   # save the entry
+            current = {tag: value}        # start a fresh one
+        elif tag in spec.member_tags:
+            # a field belonging to the current entry
+            if current is not None:
+                current[tag] = value
+        else:
+            # tag outside the group → the group has ended
+            break
+
+    # 3. Save the final entry (the loop never gets a chance to)
+    if current is not None:
+        entries.append(current)
+
+    return entries, declared_count
+
+
+
 def extract_header(tokens: List[Tuple[int, str]]) -> Dict[int, str]:
     """
     Extract and validate the FIX header.
