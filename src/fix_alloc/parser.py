@@ -81,6 +81,16 @@ PARTIES_GROUP = GroupSpec(
     },
 )
 
+# Trade-level (scalar) fields we pull from the body
+TRADE_LEVEL_TAGS = {
+    tags.ALLOC_ID,          # 70
+    tags.ALLOC_TRANS_TYPE,  # 71
+    tags.REF_ALLOC_ID,      # 72
+    tags.SIDE,              # 54
+    tags.SYMBOL,            # 55
+    tags.QUANTITY,          # 53
+}
+
 
 def extract_group(
     tokens: List[Tuple[int, str]],
@@ -242,4 +252,44 @@ def parse_message(message: str) -> Dict:
         'header': header,
         'body': body,
         'trailer': trailer,
+    }
+
+
+def parse_allocation_instruction(message: str) -> Dict:
+    """
+    Parse a full FIX AllocationInstruction into structured data.
+
+    Combines tokenizing, header/trailer extraction, trade-level field
+    extraction, and repeating-group reconstruction into one result.
+
+    Returns:
+        {
+            "header":      {tag: value, ...},
+            "trade":       {tag: value, ...},          # scalar trade-level fields
+            "allocations": [{tag: value, ...}, ...],   # one dict per allocation
+            "parties":     [{tag: value, ...}, ...],   # one dict per party
+            "trailer":     {tag: value, ...},
+        }
+    """
+    parsed = parse_message(message)
+    body = parsed["body"]
+
+    # Repeating groups (with count validation)
+    allocations, alloc_count = extract_group(body, ALLOCATIONS_GROUP)
+    validate_group_count(allocations, alloc_count, "Allocations")
+
+    parties, party_count = extract_group(body, PARTIES_GROUP)
+    validate_group_count(parties, party_count, "Parties")
+
+    # Trade-level scalar fields
+    trade_fields = {
+        tag: value for tag, value in body if tag in TRADE_LEVEL_TAGS
+    }
+
+    return {
+        "header": parsed["header"],
+        "trade": trade_fields,
+        "allocations": allocations,
+        "parties": parties,
+        "trailer": parsed["trailer"],
     }
