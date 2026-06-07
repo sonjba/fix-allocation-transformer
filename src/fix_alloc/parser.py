@@ -1,6 +1,8 @@
 """FIX wire parser: tokenizes and structures FIX messages."""
 
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Set
+from dataclasses import dataclass
+from fix_alloc import tags
 
 
 class ParseError(Exception):
@@ -47,6 +49,37 @@ def tokenize(message: str) -> List[Tuple[int, str]]:
         tokens.append((tag, value))
     
     return tokens
+
+
+@dataclass
+class GroupSpec:
+    """Describes the structure of a FIX repeating group."""
+    count_tag: int        # tag announcing how many entries (e.g. 78 = NoAllocs)
+    delimiter_tag: int    # tag marking the start of each entry (e.g. 79 = AllocAccount)
+    member_tags: Set[int] # all tags belonging to one entry
+
+
+# Concrete group specs for AllocationInstruction
+ALLOCATIONS_GROUP = GroupSpec(
+    count_tag=tags.NO_ALLOCS,            # 78
+    delimiter_tag=tags.ALLOC_ACCOUNT,    # 79
+    member_tags={
+        tags.ALLOC_ACCOUNT,              # 79
+        tags.ALLOC_QTY,                  # 80
+        tags.ALLOC_PRICE,                # 366
+        tags.INDIVIDUAL_ALLOC_ID,        # 467
+    },
+)
+
+PARTIES_GROUP = GroupSpec(
+    count_tag=tags.NO_PARTY_IDS,         # 453
+    delimiter_tag=tags.PARTY_ID,         # 448
+    member_tags={
+        tags.PARTY_ID,                   # 448
+        tags.PARTY_ID_SOURCE,            # 447
+        tags.PARTY_ROLE,                 # 452
+    },
+)
 
 
 def extract_header(tokens: List[Tuple[int, str]]) -> Dict[int, str]:
