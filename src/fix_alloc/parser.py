@@ -136,6 +136,30 @@ def extract_group(
 
 
 
+def validate_group_count(
+    entries: List[Dict[int, str]],
+    declared_count: int,
+    group_name: str,
+) -> None:
+    """
+    Check that the number of entries found matches the declared count.
+
+    The count tag (e.g. NoAllocs 78) states how many entries should follow.
+    If the actual number differs, the message is suspect.
+
+    Raises:
+        ParseError: if actual entry count differs from declared_count
+    """
+    actual_count = len(entries)
+    if actual_count != declared_count:
+        raise ParseError(
+            f"{group_name} count mismatch: "
+            f"declared {declared_count}, found {actual_count}"
+        )
+
+
+
+
 def extract_header(tokens: List[Tuple[int, str]]) -> Dict[int, str]:
     """
     Extract and validate the FIX header.
