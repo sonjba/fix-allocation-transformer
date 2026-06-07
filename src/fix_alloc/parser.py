@@ -1,6 +1,8 @@
 """FIX wire parser: tokenizes and structures FIX messages."""
 
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Set
+from dataclasses import dataclass
+from fix_alloc import tags
 
 
 class ParseError(Exception):
@@ -47,6 +49,125 @@ def tokenize(message: str) -> List[Tuple[int, str]]:
         tokens.append((tag, value))
     
     return tokens
+
+
+@dataclass
+class GroupSpec:
+    """Describes the structure of a FIX repeating group."""
+    count_tag: int        # tag announcing how many entries (e.g. 78 = NoAllocs)
+    delimiter_tag: int    # tag marking the start of each entry (e.g. 79 = AllocAccount)
+    member_tags: Set[int] # all tags belonging to one entry
+
+
+# Concrete group specs for AllocationInstruction
+ALLOCATIONS_GROUP = GroupSpec(
+    count_tag=tags.NO_ALLOCS,            # 78
+    delimiter_tag=tags.ALLOC_ACCOUNT,    # 79
+    member_tags={
+        tags.ALLOC_ACCOUNT,              # 79
+        tags.ALLOC_QTY,                  # 80
+        tags.ALLOC_PRICE,                # 366
+        tags.INDIVIDUAL_ALLOC_ID,        # 467
+    },
+)
+
+PARTIES_GROUP = GroupSpec(
+    count_tag=tags.NO_PARTY_IDS,         # 453
+    delimiter_tag=tags.PARTY_ID,         # 448
+    member_tags={
+        tags.PARTY_ID,                   # 448
+        tags.PARTY_ID_SOURCE,            # 447
+        tags.PARTY_ROLE,                 # 452
+    },
+)
+
+# Trade-level (scalar) fields we pull from the body
+TRADE_LEVEL_TAGS = {
+    tags.ALLOC_ID,          # 70
+    tags.ALLOC_TRANS_TYPE,  # 71
+    tags.REF_ALLOC_ID,      # 72
+    tags.SIDE,              # 54
+    tags.SYMBOL,            # 55
+    tags.QUANTITY,          # 53
+}
+
+
+def extract_group(
+    tokens: List[Tuple[int, str]],
+    spec: GroupSpec,
+) -> Tuple[List[Dict[int, str]], int]:
+    """
+    Extract one repeating group from a flat token list.
+
+    Walks the tokens, using the spec's delimiter tag to mark where each
+    entry starts. Stops when it hits a tag that doesn't belong to the group.
+
+    Returns:
+        (entries, declared_count)
+          entries        — list of dicts, each {tag: value} for one entry
+          declared_count — the count the message claims (from the count tag)
+    """
+    # 1. Find the count tag, and where the entries begin
+    start_index = None
+    declared_count = 0
+    for i, (tag, value) in enumerate(tokens):
+        if tag == spec.count_tag:
+            declared_count = int(value)
+            start_index = i + 1
+            break
+
+    # Group not present in this message
+    if start_index is None:
+        return [], 0
+
+    # 2. Walk the entries
+    entries = []
+    current = None
+
+    for tag, value in tokens[start_index:]:
+        if tag == spec.delimiter_tag:
+            # delimiter → a new entry begins
+            if current is not None:
+                entries.append(current)   # save the entry
+            current = {tag: value}        # start a fresh one
+        elif tag in spec.member_tags:
+            # a field belonging to the current entry
+            if current is not None:
+                current[tag] = value
+        else:
+            # tag outside the group → the group has ended
+            break
+
+    # 3. Save the final entry (the loop never gets a chance to)
+    if current is not None:
+        entries.append(current)
+
+    return entries, declared_count
+
+
+
+def validate_group_count(
+    entries: List[Dict[int, str]],
+    declared_count: int,
+    group_name: str,
+) -> None:
+    """
+    Check that the number of entries found matches the declared count.
+
+    The count tag (e.g. NoAllocs 78) states how many entries should follow.
+    If the actual number differs, the message is suspect.
+
+    Raises:
+        ParseError: if actual entry count differs from declared_count
+    """
+    actual_count = len(entries)
+    if actual_count != declared_count:
+        raise ParseError(
+            f"{group_name} count mismatch: "
+            f"declared {declared_count}, found {actual_count}"
+        )
+
+
 
 
 def extract_header(tokens: List[Tuple[int, str]]) -> Dict[int, str]:
@@ -131,4 +252,44 @@ def parse_message(message: str) -> Dict:
         'header': header,
         'body': body,
         'trailer': trailer,
+    }
+
+
+def parse_allocation_instruction(message: str) -> Dict:
+    """
+    Parse a full FIX AllocationInstruction into structured data.
+
+    Combines tokenizing, header/trailer extraction, trade-level field
+    extraction, and repeating-group reconstruction into one result.
+
+    Returns:
+        {
+            "header":      {tag: value, ...},
+            "trade":       {tag: value, ...},          # scalar trade-level fields
+            "allocations": [{tag: value, ...}, ...],   # one dict per allocation
+            "parties":     [{tag: value, ...}, ...],   # one dict per party
+            "trailer":     {tag: value, ...},
+        }
+    """
+    parsed = parse_message(message)
+    body = parsed["body"]
+
+    # Repeating groups (with count validation)
+    allocations, alloc_count = extract_group(body, ALLOCATIONS_GROUP)
+    validate_group_count(allocations, alloc_count, "Allocations")
+
+    parties, party_count = extract_group(body, PARTIES_GROUP)
+    validate_group_count(parties, party_count, "Parties")
+
+    # Trade-level scalar fields
+    trade_fields = {
+        tag: value for tag, value in body if tag in TRADE_LEVEL_TAGS
+    }
+
+    return {
+        "header": parsed["header"],
+        "trade": trade_fields,
+        "allocations": allocations,
+        "parties": parties,
+        "trailer": parsed["trailer"],
     }
